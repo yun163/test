@@ -1,0 +1,11 @@
+.idea*
+*.log
+*.iml
+project/project
+project/target
+target/
+tmp/*
+
+# local snapshots
+snapshots
+testbak/
