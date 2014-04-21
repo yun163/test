@@ -37,7 +37,8 @@ libraryDependencies ++= Seq("org.apache.hadoop" % "hadoop-core"   % "1.1.2",
   "org.iq80.leveldb"            % "leveldb"                      % "0.5",
   "org.fusesource.leveldbjni"   % "leveldbjni-all"               % "1.7",
   "com.github.scullxbones" % "akka-persistence-mongo-casbah_2.10" % "0.0.9-SNAPSHOT",
-  "de.flapdoodle.embed" % "de.flapdoodle.embed.mongo" % "1.42" % "test"
+  "de.flapdoodle.embed" % "de.flapdoodle.embed.mongo" % "1.42" % "test",
+  "com.twitter" %% "util-eval" % "6.12.1"
 )
 
 libraryDependencies += ("org.hbase"        % "asynchbase"    % "1.4.1")
