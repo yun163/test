@@ -2,7 +2,7 @@ name := "test"
 
 version := "1.0"
 
-scalaVersion := "2.10.3"
+scalaVersion := "2.10.4"
 
 val scalaTestVersion = "2.0"
 
@@ -50,7 +50,8 @@ libraryDependencies ++= Seq(
     "org.iq80.leveldb"            % "leveldb"                      % "0.5",
     "org.fusesource.leveldbjni"   % "leveldbjni-all"               % "1.7",
     "de.flapdoodle.embed" % "de.flapdoodle.embed.mongo" % "1.42" % "test",
-    "com.twitter" %% "util-eval" % "6.12.1"
+    "com.twitter" %% "util-eval" % "6.12.1",
+    "com.coinport" %% "coinex-client" % "1.1.18-SNAPSHOT"
     )
 
 libraryDependencies += ("org.hbase"        % "asynchbase"    % "1.4.1")
