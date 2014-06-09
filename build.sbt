@@ -14,7 +14,7 @@ resolvers += "coinport-repo" at "http://192.168.0.105:8081/nexus/content/groups/
 
 resolvers += "maven2" at "http://repo1.maven.org/maven2"
 
-libraryDependencies += ("com.coinport" %% "akka-persistence-hbase" % "1.0.7-SNAPSHOT")
+libraryDependencies += ("com.coinport" %% "akka-persistence-hbase" % "1.0.8-SNAPSHOT")
   .exclude("org.jboss.netty", "netty")
   .exclude("org.jruby", "jruby-complete")
   .exclude("javax.xml.stream", "stax-api")

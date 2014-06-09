@@ -14,13 +14,14 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{ Path, FileSystem }
 import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.KeyValue
+import scala.collection.mutable
 import scala.concurrent.Future
 import scala.collection.JavaConverters._
 
 import DeferredConversions._
 
 object DumpEventSource extends App {
-  override def main(args: Array[String]) = {
+  override def main(args: Array[String]) {
     if (args.length < 1) {
       sys.error("Enter processorId to dump")
       sys.exit(-1)
@@ -32,7 +33,6 @@ object DumpEventSource extends App {
 
 class DoDumpEventSource() {
   private val config = ConfigFactory.load(getClass.getClassLoader, "application.conf")
-  println("config.toString" + config.toString)
   private implicit val system = ActorSystem("test", config)
   private lazy val fs: FileSystem = openHdfsSystem(config.getString("dump.hdfsHost"))
   private val exportSnapshotHdfsDir = config.getString("dump.dumpSnapshotHdfsDir")
@@ -42,7 +42,8 @@ class DoDumpEventSource() {
   private val messagesFamily = config.getString("dump.family")
   private val cryptKey = config.getString("dump.encryption-settings")
   private val BUFFER_SIZE = 2048
-  private val SCAN_MAX_NUM_ROWS = 50
+  private val SCAN_MAX_NUM_ROWS = 5
+  private val replayGapRetry = 5
 
   implicit var pluginPersistenceSettings = PluginPersistenceSettings(config, JOURNAL_CONFIG)
   implicit var executionContext = system.dispatcher
@@ -52,7 +53,10 @@ class DoDumpEventSource() {
   def exportData(processorId: String) = {
     val toSeqNum = dumpSnapshot(processorId, StartSeqNum)
     println("*" * 50 + s" toSeqNum : ${toSeqNum}")
-    dumpMessages(processorId, StartSeqNum, Long.MaxValue)
+    dumpMessages(processorId, StartSeqNum, Long.MaxValue) onComplete {
+      _ =>
+        sys.exit(0)
+    }
   }
 
   def dumpSnapshot(processorId: String, processedSeqNum: Long): Long = {
@@ -76,66 +80,121 @@ class DoDumpEventSource() {
   }
 
   // "fromSeqNum" is inclusive, "toSeqNum" is exclusive
-  def dumpMessages(processorId: String, fromSeqNum: Long, toSeqNum: Long) {
-    if (toSeqNum <= fromSeqNum) return
+  def dumpMessages(processorId: String, fromSeqNum: Long, toSeqNum: Long): Future[Unit] = {
+    if (toSeqNum <= fromSeqNum) return Future(())
     val client = getHBaseClient()
-    val scanner = new SaltedScanner(client, pluginPersistenceSettings.partitionCount, Bytes.toBytes(messagesTable), Bytes.toBytes(messagesFamily))
-    scanner.setSaltedStartKeys(processorId, fromSeqNum)
-    scanner.setSaltedStopKeys(processorId, toSeqNum)
-    scanner.setKeyRegexp(processorId)
-    scanner.setMaxNumRows(SCAN_MAX_NUM_ROWS)
+    var retryTimes: Int = 0
+    var isDuplicate = false
+    var tryStartSeqNr: Long = if (fromSeqNum <= 0) 1 else fromSeqNum
+
+    var scanner: SaltedScanner = null
     type AsyncBaseRows = JArrayList[JArrayList[KeyValue]]
 
-    def getMessages(rows: AsyncBaseRows): String = {
+    def hasSequenceGap(columns: collection.mutable.Buffer[KeyValue]): Boolean = {
+      val processingSeqNr = sequenceNr(columns)
+      if (tryStartSeqNr != processingSeqNr) {
+        if (tryStartSeqNr > processingSeqNr) {
+          sys.error(s"Replay $processorId Meet duplicated message: to process is $tryStartSeqNr, actual is $processingSeqNr")
+          isDuplicate = true
+        }
+        return true
+      } else {
+        return false
+      }
+    }
+
+    def initScanner() {
+      if (scanner != null) scanner.close()
+      scanner = new SaltedScanner(client, pluginPersistenceSettings.partitionCount, Bytes.toBytes(messagesTable), Bytes.toBytes(messagesFamily))
+      scanner.setSaltedStartKeys(processorId, tryStartSeqNr)
+      scanner.setSaltedStopKeys(processorId, RowKey.toSequenceNr(toSeqNum))
+      scanner.setKeyRegexp(processorId)
+      scanner.setMaxNumRows(SCAN_MAX_NUM_ROWS)
+    }
+
+    def sequenceNr(columns: mutable.Buffer[KeyValue]): Long = {
+      for (column <- columns) {
+        if (java.util.Arrays.equals(column.qualifier, SequenceNr)) {
+          return Bytes.toLong(column.value())
+        }
+      }
+      0L
+    }
+
+    // (isFailed, failedErrMsg, writeMsg)
+    def getMessages(rows: AsyncBaseRows): (Boolean, String, String) = {
       val builder = new StringBuilder()
       for (row <- rows.asScala) {
-        builder ++= "{"
-        for (column <- row.asScala) {
-          if (java.util.Arrays.equals(column.qualifier, Message) || java.util.Arrays.equals(column.qualifier, SequenceNr)) {
-
-            if (java.util.Arrays.equals(column.qualifier, Message)) {
-              // will throw an exception if failed
-              val msg = serialization.deserialize(column.value(), classOf[PersistentRepr])
-              builder ++= "\"" ++= msg.payload.getClass.getEnclosingClass.getSimpleName ++= "\":"
-              builder ++= PrettyJsonSerializer.toJson(msg.payload)
-            } else {
-              builder ++= "\"" ++= Bytes.toString(column.qualifier) ++= "\":"
-              builder ++= Bytes.toLong(column.value()).toString
+        if (hasSequenceGap(row.asScala) && retryTimes < replayGapRetry) {
+          if (isDuplicate) {
+            return (true, "Duplicated message", builder.toString())
+          }
+          sys.error(s"Meet gap at ${tryStartSeqNr}")
+          retryTimes += 1
+          Thread.sleep(100)
+          initScanner()
+          return (false, "", builder.toString())
+        } else {
+          if (retryTimes >= replayGapRetry) {
+            return (true, s"Gap retry times reach ${replayGapRetry}", builder.toString())
+          }
+          builder ++= "{"
+          for (column <- row.asScala) {
+            if (java.util.Arrays.equals(column.qualifier, Message) || java.util.Arrays.equals(column.qualifier, SequenceNr)) {
+              if (java.util.Arrays.equals(column.qualifier, Message)) {
+                // will throw an exception if failed
+                val msg = serialization.deserialize(column.value(), classOf[PersistentRepr])
+                builder ++= "\"" ++= msg.payload.getClass.getEnclosingClass.getSimpleName ++= "\":"
+                builder ++= PrettyJsonSerializer.toJson(msg.payload)
+              } else {
+                builder ++= "\"" ++= Bytes.toString(column.qualifier) ++= "\":"
+                builder ++= Bytes.toLong(column.value()).toString
+                tryStartSeqNr = Bytes.toLong(column.value()) + 1
+              }
+              builder ++= ","
             }
-            builder ++= ","
           }
+          builder.delete(builder.length - 1, builder.length)
+          builder ++= "},"
+          retryTimes = 0
         }
-        builder.delete(builder.length - 1, builder.length)
-        builder ++= "},"
       }
-      builder.toString()
+      (false, "", builder.toString())
     }
 
-    def handleRows(): Future[StringBuilder] = {
-      scanner.nextRows() flatMap {
-        case null =>
-          scanner.close()
-          Future(new StringBuilder())
-        case rows: AsyncBaseRows =>
-          val builder = new StringBuilder()
-          builder ++= getMessages(rows)
-          handleRows() map {
-            res =>
-              builder ++= res
-          }
+    def handleRows(): Future[Unit] = {
+      scanner.nextRows() map {
+        _ match {
+          case null =>
+            scanner.close()
+            Future(())
+          case rows: AsyncBaseRows =>
+            val (isFailed, errMsg, writeMsg) = getMessages(rows)
+            if (!writeMsg.isEmpty && tryStartSeqNr > 0) {
+              writeMessages(writeMsg, tryStartSeqNr)
+            }
+            if (isFailed) {
+              sys.error(errMsg)
+              Future.failed(new Exception(errMsg))
+            } else {
+              handleRows()
+            }
+        }
       }
     }
 
-    handleRows() map {
-      case data if !data.isEmpty =>
-        val writer = new BufferedWriter(new OutputStreamWriter(fs.create(
-          new Path(exportMessagesHdfsDir, s"coinport_events_${processorId}_${String.valueOf(toSeqNum - 1).reverse.padTo(16, "0").reverse.mkString}_v1.json".toLowerCase))))
-        writer.write(s"""{"timestamp": ${System.currentTimeMillis()},\n"events": [""")
-        writer.write(data.substring(0, data.length - 1).toString())
-        writer.write("]}")
-        writer.flush()
-        writer.close()
+    def writeMessages(data: String, seqNum: Long) {
+      val writer = new BufferedWriter(new OutputStreamWriter(fs.create(
+        new Path(exportMessagesHdfsDir, s"coinport_events_${processorId}_${String.valueOf(seqNum).reverse.padTo(16, "0").reverse.mkString}_v1.json".toLowerCase))))
+      writer.write(s"""{"timestamp": ${System.currentTimeMillis()},\n"events": [""")
+      writer.write(data.substring(0, data.length - 1))
+      writer.write("]}")
+      writer.flush()
+      writer.close()
     }
+
+    initScanner
+    handleRows()
   }
 
   def writeSnapshot(outputDir: String, processorId: String, seqNum: Long, snapshot: Snapshot, className: String) {
