@@ -7,11 +7,11 @@ import akka.persistence.hbase.common._
 import akka.persistence.serialization.Snapshot
 import com.typesafe.config._
 import com.coinport.coinex.serializers._
-import java.util.{ ArrayList => JArrayList }
-import java.io.{ Closeable, OutputStreamWriter, BufferedWriter, BufferedInputStream }
+import java.util.{ArrayList => JArrayList}
+import java.io.{Closeable, OutputStreamWriter, BufferedWriter, BufferedInputStream}
 import org.apache.commons.io.IOUtils
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.{ Path, FileSystem }
+import org.apache.hadoop.fs.{Path, FileSystem}
 import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.KeyValue
 import scala.collection.mutable
@@ -43,12 +43,12 @@ class DoDumpEventSource() {
   private val cryptKey = config.getString("dump.encryption-settings")
   private val BUFFER_SIZE = 2048
   private val SCAN_MAX_NUM_ROWS = 5
-  private val replayGapRetry = 5
+  private val ReplayGapRetry = 5
 
   implicit var pluginPersistenceSettings = PluginPersistenceSettings(config, JOURNAL_CONFIG)
   implicit var executionContext = system.dispatcher
   implicit var serialization = EncryptingSerializationExtension(system, cryptKey)
-  val StartSeqNum:Int = 1
+  val StartSeqNum: Int = 1
 
   def exportData(processorId: String) = {
     val toSeqNum = dumpSnapshot(processorId, StartSeqNum)
@@ -65,7 +65,7 @@ class DoDumpEventSource() {
       return processedSeqNum - 1
     snapshotMetas.head match {
       // when lastSeqNum == processedSeqNum, there is one message
-      case desc @ HdfsSnapshotDescriptor(processorId: String, seqNum: Long, _) if (seqNum >= processedSeqNum) =>
+      case desc@HdfsSnapshotDescriptor(processorId: String, seqNum: Long, _) if (seqNum >= processedSeqNum) =>
         val path = new Path(snapshotHdfsDir, desc.toFilename)
         val snapshot =
           serialization.deserialize(
@@ -125,7 +125,7 @@ class DoDumpEventSource() {
     def getMessages(rows: AsyncBaseRows): (Boolean, String, String) = {
       val builder = new StringBuilder()
       for (row <- rows.asScala) {
-        if (hasSequenceGap(row.asScala) && retryTimes < replayGapRetry) {
+        if (hasSequenceGap(row.asScala) && retryTimes < ReplayGapRetry) {
           if (isDuplicate) {
             return (true, "Duplicated message", builder.toString())
           }
@@ -135,8 +135,8 @@ class DoDumpEventSource() {
           initScanner()
           return (false, "", builder.toString())
         } else {
-          if (retryTimes >= replayGapRetry) {
-            return (true, s"Gap retry times reach ${replayGapRetry}", builder.toString())
+          if (retryTimes >= ReplayGapRetry) {
+            return (true, s"Gap retry times reach ${ReplayGapRetry}", builder.toString())
           }
           builder ++= "{"
           for (column <- row.asScala) {
@@ -164,29 +164,27 @@ class DoDumpEventSource() {
 
     def handleRows(): Future[Unit] = {
       scanner.nextRows() map {
-        _ match {
-          case null =>
-            scanner.close()
-            Future(())
-          case rows: AsyncBaseRows =>
-            val (isFailed, errMsg, writeMsg) = getMessages(rows)
-            if (!writeMsg.isEmpty && tryStartSeqNr > 0) {
-              writeMessages(writeMsg, tryStartSeqNr)
-            }
-            if (isFailed) {
-              sys.error(errMsg)
-              Future.failed(new Exception(errMsg))
-            } else {
-              handleRows()
-            }
-        }
+        case null =>
+          scanner.close()
+          Future(())
+        case rows: AsyncBaseRows =>
+          val (isFailed, errMsg, writeMsg) = getMessages(rows)
+          if (!writeMsg.isEmpty && tryStartSeqNr > 0) {
+            writeMessages(writeMsg, tryStartSeqNr - 1)
+          }
+          if (isFailed) {
+            sys.error(errMsg)
+            Future.failed(new Exception(errMsg))
+          } else {
+            handleRows()
+          }
       }
     }
 
     def writeMessages(data: String, seqNum: Long) {
       val writer = new BufferedWriter(new OutputStreamWriter(fs.create(
         new Path(exportMessagesHdfsDir, s"coinport_events_${processorId}_${String.valueOf(seqNum).reverse.padTo(16, "0").reverse.mkString}_v1.json".toLowerCase))))
-      writer.write(s"""{"timestamp": ${System.currentTimeMillis()},\n"events": [""")
+      writer.write( s"""{"timestamp": ${System.currentTimeMillis()},\n"events": [""")
       writer.write(data.substring(0, data.length - 1))
       writer.write("]}")
       writer.flush()
@@ -198,7 +196,7 @@ class DoDumpEventSource() {
   }
 
   def writeSnapshot(outputDir: String, processorId: String, seqNum: Long, snapshot: Snapshot, className: String) {
-    val json =  PrettyJsonSerializer.toJson(snapshot.data)
+    val json = PrettyJsonSerializer.toJson(snapshot.data)
     val jsonSnapshot = s"""{"timestamp": ${System.currentTimeMillis()},\n"${className}": ${json}}"""
     val exportSnapshotPath = new Path(outputDir,
       s"coinport_snapshot_${processorId}_${String.valueOf(seqNum).reverse.padTo(16, "0").reverse.mkString}_v1.json".toLowerCase)
