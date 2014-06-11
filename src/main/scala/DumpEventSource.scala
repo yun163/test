@@ -53,10 +53,7 @@ class DoDumpEventSource() {
   def exportData(processorId: String) = {
     val toSeqNum = dumpSnapshot(processorId, StartSeqNum)
     println("*" * 50 + s" toSeqNum : ${toSeqNum}")
-    dumpMessages(processorId, StartSeqNum, Long.MaxValue) onComplete {
-      _ =>
-        sys.exit(0)
-    }
+    dumpMessages(processorId, StartSeqNum, Long.MaxValue)
   }
 
   def dumpSnapshot(processorId: String, processedSeqNum: Long): Long = {
