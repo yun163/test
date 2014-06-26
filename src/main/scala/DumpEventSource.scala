@@ -32,7 +32,7 @@ object DumpEventSource extends App {
 }
 
 class DoDumpEventSource() {
-  private val config = ConfigFactory.load(getClass.getClassLoader, "application.conf")
+  private val config = ConfigFactory.load(getClass.getClassLoader, "dump.conf")
   private implicit val system = ActorSystem("test", config)
   private lazy val fs: FileSystem = openHdfsSystem(config.getString("dump.hdfsHost"))
   private val exportSnapshotHdfsDir = config.getString("dump.dumpSnapshotHdfsDir")
