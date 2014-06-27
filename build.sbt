@@ -14,7 +14,7 @@ resolvers += "coinport-repo" at "http://192.168.0.105:8081/nexus/content/groups/
 
 resolvers += "maven2" at "http://repo1.maven.org/maven2"
 
-libraryDependencies += ("com.coinport" %% "akka-persistence-hbase" % "1.0.8-SNAPSHOT")
+libraryDependencies += ("com.coinport" %% "akka-persistence-hbase" % "1.0.9-SNAPSHOT")
   .exclude("org.jboss.netty", "netty")
   .exclude("org.jruby", "jruby-complete")
   .exclude("javax.xml.stream", "stax-api")
@@ -36,7 +36,7 @@ libraryDependencies += ("com.coinport" %% "akka-persistence-hbase" % "1.0.8-SNAP
 //  .exclude("tomcat", "jasper-runtime")
 //  .exclude("tomcat", "jasper-compiler")
 
-libraryDependencies += ("com.github.scullxbones" % "akka-persistence-mongo-casbah_2.10" % "0.0.9-SNAPSHOT")
+libraryDependencies += ("com.github.scullxbones" % "akka-persistence-mongo-casbah_2.10" % "0.0.4-SNAPSHOT")
   .exclude("joda-time", "joda-time")
 
 libraryDependencies ++= Seq(
@@ -51,7 +51,7 @@ libraryDependencies ++= Seq(
     "org.fusesource.leveldbjni"   % "leveldbjni-all"               % "1.7",
     "de.flapdoodle.embed" % "de.flapdoodle.embed.mongo" % "1.42" % "test",
     "com.twitter" %% "util-eval" % "6.12.1",
-    "com.coinport" %% "coinex-client" % "1.1.21-SNAPSHOT"
+    "com.coinport" %% "coinex-client" % "1.1.24-SNAPSHOT"
     )
 
 libraryDependencies += ("org.hbase"        % "asynchbase"    % "1.4.1")

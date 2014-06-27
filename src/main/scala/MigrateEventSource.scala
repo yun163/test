@@ -1,60 +1,68 @@
 import akka.actor.ActorSystem
-import akka.persistence.{PersistenceSettings}
+import akka.persistence.{PersistenceSettings, PersistentRepr}
 import akka.persistence.hbase.journal.{HBaseClientFactory, PluginPersistenceSettings}
 import akka.persistence.hbase.common.Const._
 import akka.persistence.hbase.common.Columns._
 import akka.persistence.hbase.common._
+import akka.persistence.serialization.Snapshot
 import com.typesafe.config._
+import com.coinport.coinex.serializers._
 import java.util.{ArrayList => JArrayList}
-import java.io._
+import java.io.{Closeable, OutputStreamWriter, BufferedWriter, BufferedInputStream}
+import org.apache.commons.io.IOUtils
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.{Path, FileSystem}
 import org.apache.hadoop.hbase.util.Bytes
-import org.apache.hadoop.hbase.util.Bytes._
 import org.hbase.async.KeyValue
 import scala.collection.mutable
 import scala.concurrent.Future
 import scala.collection.JavaConverters._
+import java.io._
 
 import DeferredConversions._
 
 object MigrateEventSource extends App {
   override def main(args: Array[String]) {
-    if (args.length < 2) {
-      sys.error("Enter formProcessorId and toProcessorId to migrate")
-      sys.exit(-1)
+    if (args.length < 4 || !(args(3).equals("all") || args(3).equals("channel"))) {
+      sys.error("Enter [formProcessorId, toProcessorId, result file, type[all total overwrite, channel marker only] to migrate")
+      sys.exit(0)
     }
     val migrator = new EventSourceMigrator
-    migrator.migrate(args(0), args(1))
+    migrator.migrate(args)
   }
 }
 
 class EventSourceMigrator extends AsyncBaseUtils {
-  private val config = ConfigFactory.load(getClass.getClassLoader, "migrator.conf")
+  private val config: com.typesafe.config.Config = ConfigFactory.load(getClass.getClassLoader, "migrator.conf")
   private implicit val system = ActorSystem("test", config)
   private val messagesTable = config.getString("migrator.table")
   private val messagesFamily = config.getString("migrator.family")
-
   private val cryptKey = config.getString("migrator.encryption-settings")
-  private val output = config.getString("migrator.result")
   private val SCAN_MAX_NUM_ROWS = 5
   private val ReplayGapRetry = 5
 
-  implicit val settings = PluginPersistenceSettings(config, JOURNAL_CONFIG)
-  implicit var executionContext = system.dispatcher
-  implicit var serialization = EncryptingSerializationExtension(system, cryptKey)
+  override implicit val settings = PluginPersistenceSettings(config, JOURNAL_CONFIG)
+  override implicit val executionContext = system.dispatcher
+  implicit val serialization = EncryptingSerializationExtension(system, cryptKey)
+  val channelConfirmMap:Map[String, Map[String, String]] = Map(
+    "p_bw_dog" -> Map("p_bw_dog" -> "p_bw_doge"),
+    "p_m_dogbtc" -> Map("p_m_dogbtc" -> "p_m_doge-btc"),
+    "p_dw" -> Map("p_bw_dog" -> "p_bw_doge")
+  )
   val StartSeqNum: Int = 1
-  val client = getHBaseClient()
-  val printerWriter: java.io.PrintWriter = new PrintWriter(new java.io.File(output))
+  override val client = getHBaseClient()
+  var printerWriter: java.io.PrintWriter = null
 
   override def getTable: String = messagesTable
   override def getFamily: String = messagesFamily
 
-  def migrate(fromProcessorId: String, toProcessorId: String) = {
-    migrateMessages(fromProcessorId, toProcessorId, StartSeqNum, Long.MaxValue, output)
-    printerWriter.close()
+  def migrate(args: Array[String]) = {
+    printerWriter = new PrintWriter(new java.io.File(args(2)))
+    migrateMessages(args(0), args(1), args(3), StartSeqNum, Long.MaxValue)
   }
 
   // "fromSeqNum" is inclusive, "toSeqNum" is exclusive
-  def migrateMessages(fromProcessorId: String, toProcessorId: String, fromSeqNum: Long, toSeqNum: Long, output: String): Future[Unit] = {
+  def migrateMessages(fromProcessorId: String, toProcessorId: String, overWriteType: String, fromSeqNum: Long, toSeqNum: Long): Future[Unit] = {
     if (toSeqNum <= fromSeqNum) return Future(())
 
     var retryTimes: Int = 0
@@ -96,6 +104,20 @@ class EventSourceMigrator extends AsyncBaseUtils {
       0L
     }
 
+    def modifyMarker(original: Array[Byte]): (Boolean, Array[Byte]) = {
+      val orgMk = Bytes.toString(original)
+      if (channelConfirmMap.contains(fromProcessorId)) {
+        val transferMap: Map[String, String] = channelConfirmMap(fromProcessorId)
+        transferMap.keys foreach {
+          toReplace =>
+            if (orgMk.contains(toReplace)) {
+              return (true, Bytes.toBytes(orgMk.replaceFirst(toReplace, transferMap(toReplace))))
+            }
+        }
+      }
+      (false, original)
+    }
+
     // (isFailed, failedErrMsg)
     def writeMessages(rows: AsyncBaseRows): (Boolean, String) = {
       for (row <- rows.asScala) {
@@ -114,6 +136,7 @@ class EventSourceMigrator extends AsyncBaseUtils {
           }
           var sequenceNr = 0L
           var msg: Array[Byte] = null
+          var writeMarker = false
           var marker: Array[Byte] = null
           for (column <- row.asScala) {
             if (java.util.Arrays.equals(column.qualifier, SequenceNr)) {
@@ -121,17 +144,35 @@ class EventSourceMigrator extends AsyncBaseUtils {
               tryStartSeqNr = sequenceNr + 1
             } else if (java.util.Arrays.equals(column.qualifier, Message)) {
               msg = column.value()
-            } else if (java.util.Arrays.equals(column.qualifier, Message)) {
-              marker= column.value()
+            } else if (java.util.Arrays.equals(column.qualifier, Marker)) {
+              val res = modifyMarker(column.value())
+              writeMarker = res._1
+              marker = res._2
             }
           }
-          executePut(
-            RowKey(toProcessorId, sequenceNr).toBytes,
-            Array(ProcessorId, SequenceNr, Marker, Message),
-            Array(toBytes(toProcessorId), toBytes(sequenceNr), marker, msg),
-            false // forceFlush to guarantee ordering
-          )
-          printerWriter.println(sequenceNr)
+          println(s">>>>>>>>>>>>>>>>>>>>>>>>>>> prepare to write message [$sequenceNr, ${RowKey(toProcessorId, sequenceNr).toKeyString}, ${Bytes.toString(marker)}}]" )
+          if (overWriteType.equals("all")) {
+            executePut(
+              RowKey(toProcessorId, sequenceNr).toBytes,
+              Array(ProcessorId, SequenceNr, Marker, Message),
+              Array(Bytes.toBytes(toProcessorId), Bytes.toBytes(sequenceNr), marker, msg),
+              false // forceFlush to guarantee ordering
+            )
+          } else if (overWriteType.equals("channel")){
+            if (writeMarker) {
+              executePut(
+                RowKey(toProcessorId, sequenceNr).toBytes,
+                Array(Marker),
+                Array(marker),
+                false // forceFlush to guarantee ordering
+              )
+            }
+          }
+          if (writeMarker) {
+            printerWriter.println(s"$sequenceNr\t${Bytes.toString(marker)}")
+          } else {
+            printerWriter.println(sequenceNr)
+          }
           printerWriter.flush()
           retryTimes = 0
         }

@@ -49,6 +49,7 @@ class DoDumpEventSource() {
   implicit var executionContext = system.dispatcher
   implicit var serialization = EncryptingSerializationExtension(system, cryptKey)
   val StartSeqNum: Int = 1
+  val client = getHBaseClient()
 
   def exportData(processorId: String) = {
     val toSeqNum = dumpSnapshot(processorId, StartSeqNum)
@@ -79,7 +80,6 @@ class DoDumpEventSource() {
   // "fromSeqNum" is inclusive, "toSeqNum" is exclusive
   def dumpMessages(processorId: String, fromSeqNum: Long, toSeqNum: Long): Future[Unit] = {
     if (toSeqNum <= fromSeqNum) return Future(())
-    val client = getHBaseClient()
     var retryTimes: Int = 0
     var isDuplicate = false
     var tryStartSeqNr: Long = if (fromSeqNum <= 0) 1 else fromSeqNum

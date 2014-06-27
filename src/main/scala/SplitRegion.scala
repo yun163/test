@@ -7,8 +7,8 @@ import org.apache.hadoop.hbase.HBaseConfiguration
 object SplitRegion extends App {
 
   override def main(args: Array[String]) = {
-//    create(args)
-    split(args)
+    create(args)
+//    split(args)
 //    getSplitKeys(18, isPrint = true, startNum = Some(6))
   }
 
@@ -63,7 +63,7 @@ object SplitRegion extends App {
   private def getAdmin(args: Array[String]):HBaseAdmin = {
     if (args.length < 5) {
       println("""enter 5 parameters for "cluster.distributed[1: true, 0: false]", "zookeeper.quorum[hadoop:2181]",  "table[messages]", "family[a]", "splitCount[18]", "splitStartNum" """)
-      sys.exit(-1)
+      sys.exit(0)
     }
     val conf = HBaseConfiguration.create()
     conf.set("cluster.distributed", if ("1".equals(args(0))) "true" else "false")
