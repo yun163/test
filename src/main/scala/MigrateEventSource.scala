@@ -47,6 +47,7 @@ class EventSourceMigrator extends AsyncBaseUtils {
   val channelConfirmMap:Map[String, Map[String, String]] = Map(
     "p_bw_dog" -> Map("p_bw_dog" -> "p_bw_doge"),
     "p_m_dogbtc" -> Map("p_m_dogbtc" -> "p_m_doge-btc"),
+    "p_m_ltcbtc" -> Map("p_m_ltcbtc" -> "p_m_ltc-btc"),
     "p_dw" -> Map("p_bw_dog" -> "p_bw_doge")
   )
   val StartSeqNum: Int = 1

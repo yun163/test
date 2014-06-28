@@ -6,7 +6,7 @@
 <configuration>
   <property>
     <name>fs.default.name</name>
-    <value>hdfs://weichaoli:54310</value>
+    <value>hdfs://xxxxx:54310</value>
   </property>
   <property>
     <name>hadoop.tmp.dir</name>
