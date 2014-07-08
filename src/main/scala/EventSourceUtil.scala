@@ -30,8 +30,8 @@ object EventSourceUtil extends App {
       sys.exit(0)
     }
 
-    if ("dumpEvent".equals(args(0)) && args.length == 2) {
-      dumpMessageAndSnapshot(args(1))
+    if ("dumpEvent".equals(args(0)) && args.length >= 2) {
+      dumpMessageAndSnapshot(args)
     } else if ("verifyRank".equals(args(0))) {
       rankPhoneVerify
     } else {
@@ -46,27 +46,30 @@ object EventSourceUtil extends App {
     verifyDumper.exportData("p_u")
   }
 
-  def dumpMessageAndSnapshot(processorId: String) {
+  def dumpMessageAndSnapshot(args: Array[String]) {
+    val processorId: String = args(1)
     implicit val configFile: String = "dump.conf"
     val messagesDumper = new DoDumpEventSource(DumpEvent)
-    messagesDumper.exportData(processorId)
+    val startSeq = (args.length >= 3) match {
+      case true => java.lang.Long.parseLong(args(2))
+      case false => 1L
+    }
+    val stopSeq = (args.length >= 4) match {
+      case true => java.lang.Long.parseLong(args(3))
+      case false => Long.MaxValue
+    }
+    messagesDumper.exportData(processorId, startSeq, stopSeq)
     val snapshotDumper = new DumpSnapshot()
-    snapshotDumper.dumpSnapshot(processorId, 1)
+    snapshotDumper.dumpSnapshot(processorId)
   }
 
   def DumpEvent(messages: List[(Long, Any)], lastSeqNum: Long, processorId: String, exportMessagesHdfsDir: String, fs: FileSystem, isEnd: Boolean) {
     if (messages.isEmpty || isEnd)
       return
-    val builder = new StringBuilder("{")
-    for ((seqNum, payload) <- messages) {
-      builder ++= "\"" ++= payload.getClass.getEnclosingClass.getSimpleName ++= "\":"
-      builder ++= PrettyJsonSerializer.toJson(payload)
-      builder ++= "\"" ++= Bytes.toString(SequenceNr) ++= "\":"
-      builder ++= String.valueOf(seqNum)
-      builder ++= ","
-      builder.delete(builder.length - 1, builder.length)
+    val builder = new StringBuilder()
+    for ((seqNum, msg) <- messages) {
+      builder ++= s"""{"${msg.getClass.getEnclosingClass.getSimpleName}":${PrettyJsonSerializer.toJson(msg)},"${Bytes.toString(SequenceNr)}":${seqNum.toString}},"""
     }
-    builder ++= "},"
     writeMessages(builder.toString, lastSeqNum, processorId)
 
     def writeMessages(data: String, seqNum: Long, processorId: String) {
@@ -108,7 +111,7 @@ object writeVerifyRank {
     if (verifyWriter == null) {
       val format = new java.text.SimpleDateFormat("yyyy_MM_dd_hh_mm_ss")
       verifyWriter = new BufferedWriter(new OutputStreamWriter(fs.create(
-        new Path(exportVerifyRankHdfsDir, s"coinport_phone_verified_users_${format.format(new java.util.Date(System.currentTimeMillis()))}.cvs".toLowerCase))))
+        new Path(exportVerifyRankHdfsDir, s"coinport_phone_verified_users_${format.format(new java.util.Date(System.currentTimeMillis()))}.csv".toLowerCase))))
     }
     if (!data.isEmpty) {
       verifyWriter.write(data)
@@ -150,8 +153,8 @@ class DoDumpEventSource(func: (List[(Long, Any)], Long, String, String, FileSyst
   val StartSeqNum: Int = 1
   val client = getHBaseClient()
 
-  def exportData(processorId: String) = {
-    dumpMessages(processorId, StartSeqNum, Long.MaxValue)
+  def exportData(processorId: String, fromSeqNum: Long = StartSeqNum, toSeqNum: Long = Long.MaxValue) = {
+    dumpMessages(processorId, fromSeqNum, toSeqNum)
   }
 
   // "fromSeqNum" is inclusive, "toSeqNum" is exclusive
@@ -266,7 +269,7 @@ class DumpSnapshot(implicit val configFile: String) extends DumpEventCommon {
   private val exportSnapshotHdfsDir = config.getString("dump.dumpSnapshotHdfsDir")
   private val snapshotHdfsDir: String = config.getString("dump.snapshot-dir")
 
-  def dumpSnapshot(processorId: String, processedSeqNum: Long): Long = {
+  def dumpSnapshot(processorId: String, processedSeqNum: Long = 1): Long = {
     val snapshotMetas = listSnapshots(snapshotHdfsDir, processorId)
     if (snapshotMetas.isEmpty) //no file to process, let processedSeqNum to former process's lastNum, which is processedSeqNum - 1
       return processedSeqNum - 1
