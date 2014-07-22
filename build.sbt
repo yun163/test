@@ -51,7 +51,7 @@ libraryDependencies ++= Seq(
     "org.fusesource.leveldbjni"   % "leveldbjni-all"               % "1.7",
     "de.flapdoodle.embed" % "de.flapdoodle.embed.mongo" % "1.42" % "test",
     "com.twitter" %% "util-eval" % "6.12.1",
-    "com.coinport" %% "coinex-client" % "1.1.26-SNAPSHOT"
+    "com.coinport" %% "coinex-client" % "1.1.32-SNAPSHOT"
     )
 
 libraryDependencies += ("org.hbase"        % "asynchbase"    % "1.4.1")
