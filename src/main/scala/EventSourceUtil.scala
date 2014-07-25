@@ -248,6 +248,7 @@ class DoDumpEventSource(func: (List[(Long, Any)], Long, String, String, FileSyst
           func(List.empty, tryStartSeqNr - 1, processorId, exportMessagesHdfsDir, fs, true)
           client.shutdown()
           fs.close()
+          sys.exit(0)
           Future(())
         case rows: AsyncBaseRows =>
           val (isFailed, errMsg, messages) = getMessages(rows)
@@ -305,6 +306,7 @@ class DumpSnapshot(implicit val configFile: String) extends DumpEventCommon {
       s"coinport_snapshot_${processorId}_${String.valueOf(seqNum).reverse.padTo(16, "0").reverse.mkString}_v1.json".toLowerCase)
     withStream(new BufferedWriter(new OutputStreamWriter(fs.create(exportSnapshotPath, true)), BUFFER_SIZE))(IOUtils.write(jsonSnapshot, _))
     fs.close()
+    sys.exit(0)
   }
 
   private def listSnapshots(snapshotDir: String, processorId: String): Seq[HdfsSnapshotDescriptor] = {
