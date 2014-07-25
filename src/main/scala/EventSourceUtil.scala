@@ -26,16 +26,18 @@ object EventSourceUtil extends App {
 
   override def main(args: Array[String]) {
     if (args.length < 1) {
-      sys.error("Enter tool[dumpEvent, verifyRank] to run and processorId exceeded for dumpEvent")
+      sys.error("Enter tool[dumpMessages, dumpSnapshot, verifyRank] to run and processorId exceeded for dumpEvent")
       sys.exit(0)
     }
 
-    if ("dumpEvent".equals(args(0)) && args.length >= 2) {
-      dumpMessageAndSnapshot(args)
+    if ("dumpMessages".equals(args(0)) && args.length >= 2) {
+      dumpMessages(args)
+    } else if ("dumpSnapshot".equals(args(0)) && args.length >= 2) {
+      dumpSnapshot(args)
     } else if ("verifyRank".equals(args(0))) {
       rankPhoneVerify
     } else {
-      sys.error("Enter tool[dumpEvent, verifyRank] to run and processorId exceeded for dumpEvent")
+      sys.error("Enter tool[dumpMessages, dumpSnapshot, verifyRank] to run and processorId exceeded for dumpEvent")
     }
 
   }
@@ -46,10 +48,10 @@ object EventSourceUtil extends App {
     verifyDumper.exportData("p_u")
   }
 
-  def dumpMessageAndSnapshot(args: Array[String]) {
+  def dumpMessages(args: Array[String]) {
     val processorId: String = args(1)
     implicit val configFile: String = "dump.conf"
-    val messagesDumper = new DoDumpEventSource(DumpEvent)
+    val messagesDumper = new DoDumpEventSource(exportMessages)
     val startSeq = (args.length >= 3) match {
       case true => java.lang.Long.parseLong(args(2))
       case false => 1L
@@ -59,11 +61,16 @@ object EventSourceUtil extends App {
       case false => Long.MaxValue
     }
     messagesDumper.exportData(processorId, startSeq, stopSeq)
+  }
+
+  def dumpSnapshot(args: Array[String]) {
+    val processorId: String = args(1)
+    implicit val configFile: String = "dump.conf"
     val snapshotDumper = new DumpSnapshot()
     snapshotDumper.dumpSnapshot(processorId)
   }
 
-  def DumpEvent(messages: List[(Long, Any)], lastSeqNum: Long, processorId: String, exportMessagesHdfsDir: String, fs: FileSystem, isEnd: Boolean) {
+  def exportMessages(messages: List[(Long, Any)], lastSeqNum: Long, processorId: String, exportMessagesHdfsDir: String, fs: FileSystem, isEnd: Boolean) {
     if (messages.isEmpty || isEnd)
       return
     val builder = new StringBuilder()
@@ -239,6 +246,8 @@ class DoDumpEventSource(func: (List[(Long, Any)], Long, String, String, FileSyst
         case null =>
           scanner.close()
           func(List.empty, tryStartSeqNr - 1, processorId, exportMessagesHdfsDir, fs, true)
+          client.shutdown()
+          fs.close()
           Future(())
         case rows: AsyncBaseRows =>
           val (isFailed, errMsg, messages) = getMessages(rows)
