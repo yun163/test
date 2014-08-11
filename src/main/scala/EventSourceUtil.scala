@@ -1,4 +1,5 @@
 import akka.actor.ActorSystem
+import akka.event.LoggingAdapter
 import akka.persistence.{PersistenceSettings, PersistentRepr}
 import akka.persistence.hbase.journal.{HBaseClientFactory, PluginPersistenceSettings}
 import akka.persistence.hbase.common.Const._
@@ -141,6 +142,7 @@ trait DumpEventCommon {
   implicit var pluginPersistenceSettings = PluginPersistenceSettings(config, JOURNAL_CONFIG)
   implicit var executionContext = system.dispatcher
   implicit var serialization = EncryptingSerializationExtension(system, cryptKey)
+  implicit val logger: LoggingAdapter = system.log
   protected val BUFFER_SIZE = 2048
 
   private def openHdfsSystem(defaultName: String): FileSystem = {

@@ -1,17 +1,12 @@
 import akka.actor.ActorSystem
-import akka.persistence.{PersistenceSettings, PersistentRepr}
+import akka.event.LoggingAdapter
+import akka.persistence.{PersistenceSettings}
 import akka.persistence.hbase.journal.{HBaseClientFactory, PluginPersistenceSettings}
 import akka.persistence.hbase.common.Const._
 import akka.persistence.hbase.common.Columns._
 import akka.persistence.hbase.common._
-import akka.persistence.serialization.Snapshot
 import com.typesafe.config._
-import com.coinport.coinex.serializers._
 import java.util.{ArrayList => JArrayList}
-import java.io.{Closeable, OutputStreamWriter, BufferedWriter, BufferedInputStream}
-import org.apache.commons.io.IOUtils
-import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.{Path, FileSystem}
 import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.KeyValue
 import scala.collection.mutable
@@ -43,6 +38,8 @@ class EventSourceMigrator extends AsyncBaseUtils {
 
   override implicit val settings = PluginPersistenceSettings(config, JOURNAL_CONFIG)
   override implicit val executionContext = system.dispatcher
+  override implicit val logger: LoggingAdapter = system.log
+
   implicit val serialization = EncryptingSerializationExtension(system, cryptKey)
   val channelConfirmMap:Map[String, Map[String, String]] = Map(
     "p_bw_dog" -> Map("p_bw_dog" -> "p_bw_doge"),
