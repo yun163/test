@@ -27,7 +27,7 @@ object HBaseProber extends App {
     var key: Long = 0L
     while (true) {
       if (key > 0) {
-        executeGet(client, table, family, String.valueOf(key)).map {
+        executeGet(client, table, family, rowKey(key, config)).map {
           res =>
             res match {
               case row: AsyncBaseRow =>
@@ -42,23 +42,30 @@ object HBaseProber extends App {
                   if (printerWriter != null) printerWriter.close()
                   printerWriter = new PrintWriter(new java.io.File(exportFileNow))
                 }
-                printerWriter.println(s"$key\t${String.valueOf(lastPut)}\t${System.currentTimeMillis() - lastPut}ms")
+                printerWriter.println(s"${rowKey(key, config)}\t${String.valueOf(lastPut)}\t${System.currentTimeMillis() - lastPut}ms")
                 printerWriter.flush()
               case null =>
             }
         }
       }
       key += 1
-      executePut(client, table, family, String.valueOf(key), DATA, String.valueOf(System.currentTimeMillis()))
+      executePut(client, table, family, rowKey(key, config), DATA, String.valueOf(System.currentTimeMillis()))
       Thread.sleep(10 * 1000)
     }//while
   }
 
+  def padNum(l: Long, howLong: Int) = String.valueOf(l).reverse.padTo(howLong, "0").reverse.mkString.substring(0, howLong)
+
+  def rowKey(seqNr: Long, config: Config): String = {
+    val partitionCount = config.getInt("prober.table.partitionCount")
+    // salt + padedNum
+    padNum((seqNr - 1) % partitionCount, 2) + padNum(seqNr, 24)
+  }
 
   def exportFile(exportPrefix: String): String = exportPrefix + new java.text.SimpleDateFormat("_YYYY_MM_dd").format(java.util.Calendar.getInstance().getTime) + ".txt"
 
   protected def executePut(client: HBaseClient, table: String, family: String, key: String, qualifier: String, value: String): Future[Unit] = {
-    println(s">>>>>>>>>>>>>>>>>> $table, $family, $key, $qualifier, $value")
+    // println(s">>>>>>>>>>>>>>>>>> $table, $family, $key, $qualifier, $value")
     val request = new PutRequest(table, key, family, qualifier, value)
     client.put(request).map(_ => client.flush())
   }
