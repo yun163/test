@@ -42,7 +42,7 @@ object HBaseProber extends App {
                   if (printerWriter != null) printerWriter.close()
                   printerWriter = new PrintWriter(new java.io.File(exportFileNow))
                 }
-                printerWriter.println(s"${rowKey(key, config)}\t${String.valueOf(lastPut)}\t${System.currentTimeMillis() - lastPut}ms")
+                printerWriter.println(s"${rowKey(key, config)}\t${String.valueOf(lastPut)}\t${new java.util.Date(lastPut)}\t${System.currentTimeMillis() - lastPut}ms")
                 printerWriter.flush()
               case null =>
             }
