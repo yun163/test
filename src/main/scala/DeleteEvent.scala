@@ -28,18 +28,18 @@ object DeleteEvent extends App {
   }
 
   def exportMessages(messages: List[String], lastSeqNum: Long, processorId: String, exportMessagesHdfsDir: String, fs: FileSystem, isEnd: Boolean) {
-    if (messages.isEmpty || isEnd)
-      return
-    writeMessages(messages.mkString("\n"), lastSeqNum, processorId)
-
-    def writeMessages(data: String, seqNum: Long, processorId: String) {
-      val writer = new BufferedWriter(new OutputStreamWriter(fs.create(
-        new Path(exportMessagesHdfsDir, s"coinport_events_${processorId}_${String.valueOf(seqNum).reverse.padTo(16, "0").reverse.mkString}_v1.json".toLowerCase))))
-      writer.write(s"$data")
-      writer.flush()
-      writer.close()
-    }
-
+//    if (messages.isEmpty || isEnd)
+//      return
+//    writeMessages(messages.mkString("\n"), lastSeqNum, processorId)
+//
+//    def writeMessages(data: String, seqNum: Long, processorId: String) {
+//      val writer = new BufferedWriter(new OutputStreamWriter(fs.create(
+//        new Path(exportMessagesHdfsDir, s"coinport_events_${processorId}_${String.valueOf(seqNum).reverse.padTo(16, "0").reverse.mkString}_v1.json".toLowerCase))))
+//      writer.write(s"$data")
+//      writer.flush()
+//      writer.close()
+//    }
+//
   }
 }
 
@@ -58,7 +58,7 @@ class DoDeleteEvent(toDeleteConfig: String, func: (List[String], Long, String, S
   implicit var serialization = EncryptingSerializationExtension(system, cryptKey)
   implicit val logger: LoggingAdapter = system.log
   protected val BUFFER_SIZE = 2048
-  private val SCAN_MAX_NUM_ROWS = 5
+  private val SCAN_MAX_NUM_ROWS = 50
   val client = getHBaseClient()
 
   private def openHdfsSystem(defaultName: String): FileSystem = {
@@ -76,26 +76,44 @@ class DoDeleteEvent(toDeleteConfig: String, func: (List[String], Long, String, S
     java.lang.Thread.sleep(500)
     val processors = scala.io.Source.fromFile(toDeleteConfig).getLines.filterNot(_.startsWith("#"))
       if (processors.isEmpty) {
-        HBaseClientFactory.shutDown()
-        fs.close()
+        shutDown
       } else {
         processors.foreach(innerDelete)
       }
   }
 
+  def shutDown() {
+    HBaseClientFactory.shutDown()
+    fs.close()
+  }
+
   def innerDelete(processor: String) {
-    val id2Seq = processor.trim.split(",")
-    if (id2Seq.size != 3) {
-      logger.error(s"invalid config $processor")
-    }
-    val processorId = id2Seq(0).trim
-    val beginSeqNr: Long = java.lang.Long.parseLong(id2Seq(1).trim)
-    val toSeqNr = (java.lang.Long.parseLong(id2Seq(2).trim) * 0.9).toLong
     if (processor.isEmpty) {
       logger.error(s"invalid config $processor")
       return
     }
-    deleteMessages(processorId, beginSeqNr, toSeqNr)
+    val id2Seq = processor.trim.split(",")
+    if (id2Seq.size != 3) {
+      logger.error(s"invalid config $processor")
+      return
+    }
+    val processorId = id2Seq(0).trim
+    val beginSeqNr: Long = java.lang.Long.parseLong(id2Seq(1).trim)
+    if (id2Seq.size < 3) {
+      deleteMessages(processorId, beginSeqNr, Long.MaxValue)
+    } else {
+      val toSeqNr = java.lang.Long.parseLong(id2Seq(2).trim)
+      for(i <- beginSeqNr to toSeqNr) {
+        removeEvent(processorId, i)
+      }
+      shutDown
+    }
+  }
+
+  def removeEvent(processorId: String, seqNr: Long) {
+    val request = new DeleteRequest(Bytes.toBytes(messagesTable), RowKey(processorId, seqNr).toBytes)
+    println(s">>>>>>>>>>>>>>>>>>>> delete $processorId at $seqNr")
+    client.delete(request)
   }
 
   def deleteMessages(processorId: String, fromSeqNum: Long, toSeqNum: Long): Future[Unit] = {
@@ -150,12 +168,6 @@ class DoDeleteEvent(toDeleteConfig: String, func: (List[String], Long, String, S
         }
       }
       messages.toList
-    }
-
-    def removeEvent(id: String, seqNr: Long) {
-      val request = new DeleteRequest(Bytes.toBytes(messagesTable), RowKey(processorId, seqNr).toBytes)
-      println(s">>>>>>>>>>>>>>>>>>>> delete $id at $seqNr")
-      client.delete(request)
     }
 
     def handleRows(): Future[Unit] = {
