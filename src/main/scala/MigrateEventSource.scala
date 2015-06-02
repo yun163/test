@@ -33,14 +33,13 @@ class EventSourceMigrator extends AsyncBaseUtils {
   private val messagesTable = config.getString("migrator.table")
   private val messagesFamily = config.getString("migrator.family")
   private val cryptKey = config.getString("migrator.encryption-settings")
+  implicit var serialization = EncryptingSerializationExtension(system, cryptKey)
   private val SCAN_MAX_NUM_ROWS = 5
   private val ReplayGapRetry = 5
 
   override implicit val settings = PluginPersistenceSettings(config, JOURNAL_CONFIG)
   override implicit val executionContext = system.dispatcher
   override implicit val logger: LoggingAdapter = system.log
-
-  implicit val serialization = EncryptingSerializationExtension(system, cryptKey)
   val channelConfirmMap:Map[String, Map[String, String]] = Map(
     "p_bw_dog" -> Map("p_bw_dog" -> "p_bw_doge"),
     "p_m_dogbtc" -> Map("p_m_dogbtc" -> "p_m_doge-btc"),
@@ -86,7 +85,7 @@ class EventSourceMigrator extends AsyncBaseUtils {
 
     def initScanner() {
       if (scanner != null) scanner.close()
-      scanner = new SaltedScanner(client, settings.partitionCount, Bytes.toBytes(messagesTable), Bytes.toBytes(messagesFamily))
+      scanner = new SaltedScanner(serialization, client, settings.partitionCount, Bytes.toBytes(messagesTable), Bytes.toBytes(messagesFamily))
       scanner.setSaltedStartKeys(fromProcessorId, tryStartSeqNr)
       scanner.setSaltedStopKeys(fromProcessorId, RowKey.toSequenceNr(toSeqNum))
       scanner.setKeyRegexp(fromProcessorId)
