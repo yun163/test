@@ -17,6 +17,8 @@ object SplitRegion extends App {
     val tableBytes = Bytes.toBytes(args(2))
     val familyBytes = Bytes.toBytes(args(3))
     val splitNum = Integer.parseInt(args(4))
+    
+    println("""Before tableExists!!""")
     if (admin.tableExists(tableBytes)) {
       val tableDesc = admin.getTableDescriptor(tableBytes)
       if (tableDesc.getFamily(familyBytes) == null) {
@@ -28,12 +30,15 @@ object SplitRegion extends App {
         println("Table Exists !!!")
       }
     } else {
+      println("""after tableExists!!""")
       val tableDesc = new HTableDescriptor(tableBytes)
       val familyDesc = genColumnFamily(familyBytes, 1)
       tableDesc.addFamily(familyDesc)
       if (splitNum > 1) {
         val splitPoints = getSplitKeys(splitNum)
+        println("""before createTable!!""")
         admin.createTable(tableDesc, splitPoints)
+        println("""after createTable!!""")
       } else {
         admin.createTable(tableDesc)
       }
@@ -67,7 +72,8 @@ object SplitRegion extends App {
     }
     val conf = HBaseConfiguration.create()
     conf.set("cluster.distributed", if ("1".equals(args(0))) "true" else "false")
-    conf.set("zookeeper.quorum", args(1))
+    //conf.set("zookeeper.quorum", args(1))
+    conf.set("hbase.zookeeper.quorum", "slave1")
     new HBaseAdmin(conf)
   }
 
